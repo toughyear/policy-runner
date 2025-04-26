@@ -2,17 +2,57 @@
 
 import { useState } from "react";
 import { AgentConfigPanel } from "../../../components";
-import { AgentTraits } from "../../../types";
+import { Agent, AgentTraits } from "../../../types";
 import { generateRandomAgentTraits } from "../../../utils/agent-traits";
 
 export default function AgentConfigTestPage() {
   const [generatedTraits, setGeneratedTraits] = useState<AgentTraits[]>([]);
+  const [generatedAgents, setGeneratedAgents] = useState<{
+    [key: number]: Agent;
+  }>({});
+  const [loadingAgents, setLoadingAgents] = useState<{
+    [key: number]: boolean;
+  }>({});
 
   const handleGenerateTraits = () => {
     const newTraits = Array(10)
       .fill(0)
       .map(() => generateRandomAgentTraits());
     setGeneratedTraits(newTraits);
+    setGeneratedAgents({});
+  };
+
+  const handleGenerateAgent = async (traits: AgentTraits, index: number) => {
+    setLoadingAgents((prev) => ({ ...prev, [index]: true }));
+
+    try {
+      const response = await fetch("/api/create-agent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to generate agent");
+      }
+
+      const data = await response.json();
+      setGeneratedAgents((prev) => ({
+        ...prev,
+        [index]: {
+          ...data.agent,
+          id: `agent-${index}`,
+          faceImage: "",
+          traits,
+        },
+      }));
+    } catch (error) {
+      console.error("Error generating agent:", error);
+    } finally {
+      setLoadingAgents((prev) => ({ ...prev, [index]: false }));
+    }
   };
 
   return (
@@ -70,6 +110,51 @@ export default function AgentConfigTestPage() {
                       {traits.income.toFixed(3)}
                     </li>
                   </ul>
+
+                  <div className='mt-4'>
+                    <button
+                      onClick={() => handleGenerateAgent(traits, index)}
+                      disabled={
+                        loadingAgents[index] ||
+                        generatedAgents[index] !== undefined
+                      }
+                      className='px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed'
+                    >
+                      {loadingAgents[index]
+                        ? "Generating..."
+                        : generatedAgents[index]
+                        ? "Generated"
+                        : "Generate Details"}
+                    </button>
+                  </div>
+
+                  {generatedAgents[index] && (
+                    <div className='mt-4 border-t pt-4'>
+                      <h4 className='font-medium mb-2'>Generated Profile</h4>
+                      <div className='space-y-2'>
+                        <p>
+                          <span className='font-medium'>Name:</span>{" "}
+                          {generatedAgents[index].name}
+                        </p>
+                        <div>
+                          <p className='font-medium'>Background:</p>
+                          <p className='text-sm text-gray-700'>
+                            {generatedAgents[index].background}
+                          </p>
+                        </div>
+                        <div>
+                          <p className='font-medium'>Memories:</p>
+                          <ul className='list-disc pl-5 text-sm text-gray-700'>
+                            {generatedAgents[index].memories.map(
+                              (memory, memIndex) => (
+                                <li key={memIndex}>{memory}</li>
+                              )
+                            )}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
