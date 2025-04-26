@@ -6,6 +6,7 @@ export interface Agent {
   traits: AgentTraits;
   memories: string[]; // Simple strings representing memories
   vote?: boolean;
+  voteReason?: string;
 }
 
 export interface AgentTraits {

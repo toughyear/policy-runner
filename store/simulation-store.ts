@@ -22,12 +22,10 @@ interface SimulationStore {
     [key: string]: {
       agent1Id: string;
       agent2Id: string;
-      messages: {
-        agentId: string;
-        text: string;
-      }[];
+      messages: string[];
     };
   };
+  conversationLogs: string[]; // Array to store conversation logs for UI display
 
   // Stage management
   setStage: (stage: SimulationStage) => void;
@@ -50,15 +48,13 @@ interface SimulationStore {
     result: {
       agent1Id: string;
       agent2Id: string;
-      messages: {
-        agentId: string;
-        text: string;
-      }[];
+      messages: string[];
     }
   ) => void;
+  addConversationLog: (log: string) => void; // Add new logs to the UI
 
   // Voting management
-  setAgentVote: (agentId: string, vote: boolean) => void;
+  setAgentVote: (agentId: string, vote: boolean, reason?: string) => void;
   getVoteResults: () => { yes: number; no: number; total: number };
 
   // Reset
@@ -71,6 +67,7 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
   policy: null,
   conversationPairs: [],
   conversationResults: {},
+  conversationLogs: [],
 
   setStage: (stage) => set({ stage }),
 
@@ -113,10 +110,15 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       },
     })),
 
-  setAgentVote: (agentId, vote) =>
+  addConversationLog: (log) =>
+    set((state) => ({
+      conversationLogs: [...state.conversationLogs, log],
+    })),
+
+  setAgentVote: (agentId, vote, reason) =>
     set((state) => ({
       agents: state.agents.map((agent) =>
-        agent.id === agentId ? { ...agent, vote } : agent
+        agent.id === agentId ? { ...agent, vote, voteReason: reason } : agent
       ),
     })),
 
@@ -140,5 +142,6 @@ export const useSimulationStore = create<SimulationStore>((set, get) => ({
       policy: null,
       conversationPairs: [],
       conversationResults: {},
+      conversationLogs: [],
     }),
 }));

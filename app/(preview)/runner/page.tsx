@@ -12,7 +12,16 @@ import { Agent } from "../../../types";
 import { generateRandomAgentTraits } from "../../../utils/agent-traits";
 
 interface AgentAvatarProps {
-  agent: Agent | { id: string; name?: string; traits?: any; vote?: boolean };
+  agent:
+    | Agent
+    | {
+        id: string;
+        name?: string;
+        traits?: any;
+        vote?: boolean;
+        memories?: string[];
+        voteReason?: string;
+      };
   seed?: string;
   isMoving: boolean;
   onClick: () => void;
@@ -135,24 +144,51 @@ function AgentAvatar({ agent, seed, isMoving, onClick }: AgentAvatarProps) {
       />
 
       {showDetails && agent && (
-        <div className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 bg-white p-2 rounded shadow-lg z-10'>
+        <div className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 bg-white p-2 rounded shadow-lg z-10 max-h-72 overflow-y-auto'>
           <h4 className='font-bold text-sm'>{agent.name}</h4>
-          <p className='text-xs'>Religion: {agent.traits?.religion}</p>
-          <p className='text-xs'>
-            Income:{" "}
-            {agent.traits?.income
-              ? Math.round(agent.traits.income * 100)
-              : "N/A"}
-            /100
-          </p>
-          {agent.vote !== undefined && (
-            <p
-              className={`text-xs font-medium ${
-                agent.vote ? "text-green-600" : "text-red-600"
-              }`}
-            >
-              {agent.vote ? "Supports" : "Opposes"} policy
+          <div className='text-xs space-y-1 mb-2'>
+            <p>Religion: {agent.traits?.religion}</p>
+            <p>
+              Income:{" "}
+              {agent.traits?.income
+                ? Math.round(agent.traits.income * 100)
+                : "N/A"}
+              /100
             </p>
+            {agent.vote !== undefined && (
+              <div className='mt-1'>
+                <p
+                  className={`font-medium ${
+                    agent.vote ? "text-green-600" : "text-red-600"
+                  }`}
+                >
+                  {agent.vote ? "Supports" : "Opposes"} policy
+                </p>
+                {agent.voteReason && (
+                  <p className='text-xs mt-1 text-gray-700 max-h-24 overflow-y-auto'>
+                    <span className='font-medium'>Why:</span> {agent.voteReason}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {agent.memories && agent.memories.length > 0 && (
+            <div className='mt-2 pt-2 border-t border-gray-200'>
+              <p className='font-medium text-xs mb-1'>Recent Memories:</p>
+              <div className='text-xs space-y-1 max-h-40 overflow-y-auto'>
+                {agent.memories.slice(-5).map((memory: string, idx: number) => (
+                  <p key={idx} className='text-gray-600'>
+                    {memory}
+                  </p>
+                ))}
+                {agent.memories.length > 5 && (
+                  <p className='text-gray-400 italic text-xs'>
+                    + {agent.memories.length - 5} more...
+                  </p>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -220,6 +256,45 @@ function AgentAvatarsContainer({
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+function ConversationLogViewer() {
+  const { conversationLogs } = useSimulationStore();
+  const logContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when logs update
+  useEffect(() => {
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [conversationLogs]);
+
+  return (
+    <div className='mt-4 border rounded-lg bg-gray-50 p-4'>
+      <h3 className='text-lg font-medium mb-2'>Conversation Logs</h3>
+      <div
+        ref={logContainerRef}
+        className='bg-white border rounded h-80 overflow-y-auto p-3 font-mono text-sm'
+      >
+        {conversationLogs.length === 0 ? (
+          <div className='text-gray-500 text-center py-4'>
+            Conversations will appear here once generated...
+          </div>
+        ) : (
+          conversationLogs.map((log, index) => (
+            <div
+              key={index}
+              className={`py-1 ${
+                log.startsWith("---") ? "font-bold mt-2 text-blue-600" : ""
+              }`}
+            >
+              {log}
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
@@ -351,10 +426,17 @@ export default function RunnerPage() {
         addConversationPair(agent1Id, agent2Id);
       });
 
-      // Generate conversations for each pair in parallel
-      const conversationPromises = pairs.map(async ([agent1Id, agent2Id]) => {
+      // Clear existing conversation logs
+      useSimulationStore.setState({ conversationLogs: [] });
+
+      // Process pairs sequentially to see logs in order
+      for (const [agent1Id, agent2Id] of pairs) {
         const agent1 = agents.find((a: Agent) => a.id === agent1Id)!;
         const agent2 = agents.find((a: Agent) => a.id === agent2Id)!;
+
+        // Add header for this conversation pair
+        const logHeader = `--- Conversation between ${agent1.name} and ${agent2.name} ---`;
+        useSimulationStore.getState().addConversationLog(logHeader);
 
         // Generate conversation using API
         const response = await fetch("/api/generate-conversation", {
@@ -377,34 +459,19 @@ export default function RunnerPage() {
 
         const data = await response.json();
 
-        return {
-          pairId: `${agent1Id}-${agent2Id}`,
-          agent1Id,
-          agent2Id,
-          conversation: data.conversation,
-        };
-      });
+        // Add each message to the logs as it comes in
+        for (const message of data.conversation.messages) {
+          useSimulationStore.getState().addConversationLog(message);
+        }
 
-      // Wait for all conversation generation to complete
-      const conversationResults = await Promise.all(conversationPromises);
-
-      // Process all conversations
-      for (const result of conversationResults) {
         // Store conversation in state
-        setConversationResult(result.pairId, result.conversation);
+        setConversationResult(`${agent1Id}-${agent2Id}`, data.conversation);
 
-        // Add memories to both agents
-        for (const message of result.conversation.messages) {
-          const speakerId = message.agentId;
-          const speaker = agents.find((a: Agent) => a.id === speakerId);
-
-          if (speaker) {
-            broadcastMemory(`${speaker.name} said: "${message.text}"`);
-          } else {
-            console.warn(
-              `Agent with ID ${speakerId} not found, skipping memory broadcast`
-            );
-          }
+        // Add all conversation messages to both agents' memories
+        for (const message of data.conversation.messages) {
+          // Add memory to both agents involved in the conversation
+          useSimulationStore.getState().addMemoryToAgent(agent1Id, message);
+          useSimulationStore.getState().addMemoryToAgent(agent2Id, message);
         }
       }
 
@@ -443,10 +510,12 @@ export default function RunnerPage() {
         }
 
         const data = await response.json();
+        console.log("Vote data for", agent.name, data); // Log the response to check structure
 
         return {
           agentId: agent.id,
           vote: data.vote,
+          reason: data.reasoning || "No reason provided",
         };
       });
 
@@ -454,8 +523,8 @@ export default function RunnerPage() {
       const voteResults = await Promise.all(votePromises);
 
       // Update all agent votes at once
-      voteResults.forEach(({ agentId, vote }) => {
-        useSimulationStore.getState().setAgentVote(agentId, vote);
+      voteResults.forEach(({ agentId, vote, reason }) => {
+        useSimulationStore.getState().setAgentVote(agentId, vote, reason);
       });
 
       setStage("results");
@@ -545,6 +614,9 @@ export default function RunnerPage() {
                 {loading ? "Running Conversations..." : "Run Conversations"}
               </button>
             </div>
+
+            {/* Show conversation logs in this stage */}
+            <ConversationLogViewer />
           </div>
         );
 
@@ -616,29 +688,34 @@ export default function RunnerPage() {
               <h3 className='text-xl font-medium mb-4'>Agent Breakdown</h3>
               <div className='space-y-4'>
                 {agents.map((agent) => (
-                  <div
-                    key={agent.id}
-                    className='flex items-center space-x-4 border-b pb-4'
-                  >
-                    <div className='flex-shrink-0 w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center'>
-                      {agent.name.charAt(0)}
+                  <div key={agent.id} className='flex flex-col border-b pb-4'>
+                    <div className='flex items-center space-x-4'>
+                      <div className='flex-shrink-0 w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center'>
+                        {agent.name.charAt(0)}
+                      </div>
+                      <div className='flex-grow'>
+                        <h4 className='font-medium'>{agent.name}</h4>
+                        <p className='text-sm text-gray-500'>
+                          {agent.traits.religion}, Income:{" "}
+                          {Math.round(agent.traits.income * 100)}/100
+                        </p>
+                      </div>
+                      <div
+                        className={`px-3 py-1 rounded-full ${
+                          agent.vote
+                            ? "bg-green-100 text-green-800"
+                            : "bg-red-100 text-red-800"
+                        }`}
+                      >
+                        {agent.vote ? "Support" : "Oppose"}
+                      </div>
                     </div>
-                    <div className='flex-grow'>
-                      <h4 className='font-medium'>{agent.name}</h4>
-                      <p className='text-sm text-gray-500'>
-                        {agent.traits.religion}, Income:{" "}
-                        {Math.round(agent.traits.income * 100)}/100
-                      </p>
-                    </div>
-                    <div
-                      className={`px-3 py-1 rounded-full ${
-                        agent.vote
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {agent.vote ? "Support" : "Oppose"}
-                    </div>
+                    {agent.voteReason && (
+                      <div className='mt-2 ml-16 text-sm italic text-gray-600 max-h-20 overflow-y-auto pr-2'>
+                        <span className='font-medium'>Reason:</span>{" "}
+                        {agent.voteReason}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
