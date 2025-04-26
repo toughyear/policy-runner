@@ -1,7 +1,8 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import AgentConfigPanel from "@/components/AgentConfigPanel";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAgentConfigStore } from "../../../store";
 import {
   SimulationStage,
@@ -9,6 +10,219 @@ import {
 } from "../../../store/simulation-store";
 import { Agent } from "../../../types";
 import { generateRandomAgentTraits } from "../../../utils/agent-traits";
+
+interface AgentAvatarProps {
+  agent: Agent | { id: string; name?: string; traits?: any; vote?: boolean };
+  seed?: string;
+  isMoving: boolean;
+  onClick: () => void;
+}
+
+function AgentAvatar({ agent, seed, isMoving, onClick }: AgentAvatarProps) {
+  const [position, setPosition] = useState({
+    x: Math.random() * 90,
+    y: Math.random() * 90,
+  });
+  const [showDetails, setShowDetails] = useState(false);
+  const avatarRef = useRef<HTMLDivElement>(null);
+  const intervalRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const directionRef = useRef({
+    x: Math.random() * 2 - 1,
+    y: Math.random() * 2 - 1,
+  });
+  const directionTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
+
+  // Initialize or change direction periodically
+  useEffect(() => {
+    if (!isMoving) return;
+
+    // Change direction every 3-8 seconds
+    const changeDirection = () => {
+      directionRef.current = {
+        x: Math.random() * 2 - 1,
+        y: Math.random() * 2 - 1,
+      };
+
+      // Normalize to avoid very slow movement
+      const magnitude = Math.sqrt(
+        directionRef.current.x * directionRef.current.x +
+          directionRef.current.y * directionRef.current.y
+      );
+      if (magnitude < 0.5) {
+        directionRef.current.x *= 1.5;
+        directionRef.current.y *= 1.5;
+      }
+
+      // Schedule next direction change
+      directionTimerRef.current = setTimeout(
+        changeDirection,
+        3000 + Math.random() * 5000
+      );
+    };
+
+    // Initialize direction
+    changeDirection();
+
+    return () => {
+      if (directionTimerRef.current) {
+        clearTimeout(directionTimerRef.current);
+      }
+    };
+  }, [isMoving]);
+
+  // Movement in the current direction
+  useEffect(() => {
+    if (isMoving) {
+      intervalRef.current = setInterval(() => {
+        setPosition((prev) => {
+          // Move in current direction
+          const speed = 0.5; // speed factor
+          const newX = prev.x + directionRef.current.x * speed;
+          const newY = prev.y + directionRef.current.y * speed;
+
+          // Validate and bounce off edges
+          let nextX = newX;
+          let nextY = newY;
+
+          // Set boundaries considering avatar size (12px = ~1.5%)
+          const minBound = 0;
+          const maxBoundX = 93; // 95 - ~2% for avatar width
+          const maxBoundY = 93; // 95 - ~2% for avatar height
+
+          // Bounce off edges with boundary enforcement
+          if (newX < minBound || newX > maxBoundX) {
+            directionRef.current.x *= -1; // Reverse direction
+            nextX = newX < minBound ? minBound : maxBoundX; // Place exactly at boundary
+          }
+
+          if (newY < minBound || newY > maxBoundY) {
+            directionRef.current.y *= -1; // Reverse direction
+            nextY = newY < minBound ? minBound : maxBoundY; // Place exactly at boundary
+          }
+
+          return {
+            x: Math.max(minBound, Math.min(maxBoundX, nextX)),
+            y: Math.max(minBound, Math.min(maxBoundY, nextY)),
+          };
+        });
+      }, 50); // smoother movement with shorter interval
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [isMoving]);
+
+  return (
+    <div
+      ref={avatarRef}
+      className={`absolute transition-all duration-300 cursor-pointer`}
+      style={{ left: `${position.x}%`, top: `${position.y}%` }}
+      onMouseEnter={() => setShowDetails(true)}
+      onMouseLeave={() => setShowDetails(false)}
+      onClick={onClick}
+    >
+      <img
+        src={`https://api.dicebear.com/9.x/lorelei/svg?seed=${
+          seed || agent?.name || Math.random()
+        }`}
+        alt={agent?.name || "Agent avatar"}
+        className='w-12 h-12 rounded-full border-2 border-white shadow-md'
+      />
+
+      {showDetails && agent && (
+        <div className='absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-48 bg-white p-2 rounded shadow-lg z-10'>
+          <h4 className='font-bold text-sm'>{agent.name}</h4>
+          <p className='text-xs'>Religion: {agent.traits?.religion}</p>
+          <p className='text-xs'>
+            Income:{" "}
+            {agent.traits?.income
+              ? Math.round(agent.traits.income * 100)
+              : "N/A"}
+            /100
+          </p>
+          {agent.vote !== undefined && (
+            <p
+              className={`text-xs font-medium ${
+                agent.vote ? "text-green-600" : "text-red-600"
+              }`}
+            >
+              {agent.vote ? "Supports" : "Opposes"} policy
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface AgentAvatarsContainerProps {
+  agents: Agent[];
+  agentCount: number;
+  stage: SimulationStage;
+}
+
+function AgentAvatarsContainer({
+  agents,
+  agentCount,
+  stage,
+}: AgentAvatarsContainerProps) {
+  const [hoveredAgentId, setHoveredAgentId] = useState<string | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
+
+  // Generate placeholder agents for config stage
+  const placeholderAgents = Array(agentCount)
+    .fill(0)
+    .map((_, i) => ({
+      id: `placeholder-${i}`,
+      name: `Agent ${i + 1}`,
+    }));
+  const displayAgents = agents.length > 0 ? agents : placeholderAgents;
+
+  return (
+    <div className='mt-8 bg-gray-100 rounded-lg p-4 relative h-[300px] overflow-hidden border border-gray-200'>
+      <div className='absolute top-2 left-2 z-10 flex space-x-2'>
+        <button
+          className={`px-3 py-1 text-xs rounded-full ${
+            isPaused ? "bg-green-500 text-white" : "bg-gray-200"
+          }`}
+          onClick={() => setIsPaused(!isPaused)}
+        >
+          {isPaused ? "Resume" : "Pause"} Animation
+        </button>
+        {stage !== "config" && (
+          <div className='px-3 py-1 text-xs bg-blue-100 rounded-full'>
+            {agents.length} Agents
+          </div>
+        )}
+      </div>
+
+      {displayAgents.map((agent) => (
+        <AgentAvatar
+          key={agent.id}
+          agent={agent}
+          seed={agent.name || agent.id}
+          isMoving={!isPaused && hoveredAgentId !== agent.id}
+          onClick={() =>
+            setHoveredAgentId(agent.id === hoveredAgentId ? null : agent.id)
+          }
+        />
+      ))}
+
+      {stage === "config" && (
+        <div className='absolute inset-0 flex items-center justify-center bg-black bg-opacity-10'>
+          <p className='text-lg font-medium text-gray-600'>
+            Configure and generate {agentCount} agents
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function RunnerPage() {
   const { config } = useAgentConfigStore();
@@ -494,6 +708,13 @@ export default function RunnerPage() {
       <div className='bg-white rounded-lg shadow-lg p-6'>
         {renderStageContent()}
       </div>
+
+      {/* Agent Avatars Visualization */}
+      <AgentAvatarsContainer
+        agents={agents}
+        agentCount={agentCount}
+        stage={stage}
+      />
     </div>
   );
 }
